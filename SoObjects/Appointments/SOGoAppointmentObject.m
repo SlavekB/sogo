@@ -138,7 +138,7 @@
 }
 
 - (SOGoAppointmentObject *) _lookupEvent: (NSString *) eventUID
-				                          forUID: (NSString *) uid
+				  forUID: (NSString *) uid
 {
   SOGoAppointmentFolder *folder;
   SOGoAppointmentObject *object;
@@ -569,7 +569,7 @@
                         [user cn], @"Cn",
                         [user systemEmail], @"SystemEmail"], nil;
               reason = [values keysWithFormat: [self labelForKey: @"Cannot access resource: \"%{Cn} %{SystemEmail}\""]];
-              return [NSException exceptionWithHTTPStatus:403 reason: reason];
+              return [NSException exceptionWithHTTPStatus:409 reason: reason];
             }
           
           fbInfo = [NSMutableArray arrayWithArray: [folder fetchFreeBusyInfosFrom: start
@@ -676,7 +676,7 @@
                   
                   reason = [values keysWithFormat: [self labelForKey: @"Maximum number of simultaneous bookings (%{NumberOfSimultaneousBookings}) reached for resource \"%{Cn} %{SystemEmail}\". The conflicting event is \"%{EventTitle}\", and starts on %{StartDate}."]];
                   
-                  return [NSException exceptionWithHTTPStatus: 403
+                  return [NSException exceptionWithHTTPStatus: 409
                                                        reason: reason];
                 }
             }
@@ -1469,14 +1469,14 @@ inRecurrenceExceptionsForEvent: (iCalEvent *) theEvent
               if (delegatedUid)
                 delegatedUser = [SOGoUser userWithLogin: delegatedUid];
               if (delegatedUser != nil && [event userIsOrganizer: delegatedUser])
-                ex = [NSException exceptionWithHTTPStatus: 403
+                ex = [NSException exceptionWithHTTPStatus: 409
                                                    reason: @"delegate is organizer"];
               if ([event isAttendee: [[delegate email] rfc822Email]])
-                ex = [NSException exceptionWithHTTPStatus: 403
+                ex = [NSException exceptionWithHTTPStatus: 409
                                                    reason: @"delegate is a participant"];
               else if ([SOGoGroup groupWithEmail: [[delegate email] rfc822Email]
                                         inDomain: [ownerUser domain]])
-                ex = [NSException exceptionWithHTTPStatus: 403
+                ex = [NSException exceptionWithHTTPStatus: 409
                                                    reason: @"delegate is a group"];
             }
           if (ex == nil)
@@ -1776,6 +1776,7 @@ inRecurrenceExceptionsForEvent: (iCalEvent *) theEvent
   NSArray *allEvents;
   iCalEvent *event;
   NSUInteger i;
+  int j;
 
   allEvents = [rqCalendar events];
 
@@ -1807,15 +1808,82 @@ inRecurrenceExceptionsForEvent: (iCalEvent *) theEvent
           uid = [[event organizer] uidInContext: context];
           if (uid)
             {
+	      iCalPerson *attendee, *organizer;
               NSDictionary *defaultIdentity;
-              SOGoUser *organizer;
+	      SOGoUser *organizerUser;
+	      NSArray *allAttendees;
 
-              organizer = [SOGoUser userWithLogin: uid];
-              defaultIdentity = [organizer defaultIdentity];
-              [[event organizer] setCn: [defaultIdentity objectForKey: @"fullName"]];
-              [[event organizer] setEmail: [defaultIdentity objectForKey: @"email"]];
+	      organizerUser = [SOGoUser userWithLogin: uid];
+              defaultIdentity = [organizerUser defaultIdentity];
+	      organizer = [[event organizer] copy];
+              [organizer setCn: [defaultIdentity objectForKey: @"fullName"]];
+              [organizer setEmail: [defaultIdentity objectForKey: @"email"]];
+
+	      // We now check if one of the attendee is also the organizer. If so,
+	      // we remove it. See bug #3905 (https://sogo.nu/bugs/view.php?id=3905)
+	      // for more details. This is a Calendar app bug on Apple Yosemite.
+	      allAttendees = [event attendees];
+
+	      for (j = [allAttendees count]-1; j >= 0; j--)
+		{
+		  attendee = [allAttendees objectAtIndex: j];
+		  if ([organizerUser hasEmail: [attendee rfc822Email]])
+		    [event removeFromAttendees: attendee];
+		}
+
+	      // We reset the organizer
+	      [event setOrganizer: organizer];
+	      RELEASE(organizer);
             }
         }
+    }
+}
+
+//
+// This is similar to what we do in SOGoAppointmentFolder: -importCalendar:
+//
+- (void) _adjustFloatingTimeInRequestCalendar: (iCalCalendar *) rqCalendar
+{
+  iCalDateTime *startDate, *endDate;
+  NSString *startDateAsString;
+  SOGoUserDefaults *ud;
+  NSArray *allEvents;
+  iCalTimeZone *tz;
+  iCalEvent *event;
+  int i, delta;
+
+  allEvents = [rqCalendar events];
+  for (i = 0; i < [allEvents count]; i++)
+    {
+      event = [allEvents objectAtIndex: i];
+
+      if ([event isAllDay])
+	continue;
+
+      startDate =  (iCalDateTime *)[event uniqueChildWithTag: @"dtstart"];
+      startDateAsString = [[startDate valuesAtIndex: 0 forKey: @""] objectAtIndex: 0];
+
+      if (![startDate timeZone] &&
+	  ![startDateAsString hasSuffix: @"Z"] &&
+	  ![startDateAsString hasSuffix: @"z"])
+	{
+	  ud = [[context activeUser] userDefaults];
+          tz = [iCalTimeZone timeZoneForName: [ud timeZoneName]];
+          if ([rqCalendar addTimeZone: tz])
+            {
+	      delta = [[tz periodForDate: [startDate dateTime]] secondsOffsetFromGMT];
+
+	      [event setStartDate: [[event startDate] dateByAddingYears: 0  months: 0  days: 0  hours: 0  minutes: 0  seconds: -delta]];
+	      [startDate setTimeZone: tz];
+
+	      endDate = (iCalDateTime *) [event uniqueChildWithTag: @"dtend"];
+	      if (endDate)
+		{
+		  [event setEndDate: [[event endDate] dateByAddingYears: 0  months: 0  days: 0  hours: 0  minutes: 0  seconds: -delta]];
+		  [endDate setTimeZone: tz];
+		}
+            }
+	}
     }
 }
 
@@ -1933,13 +2001,12 @@ inRecurrenceExceptionsForEvent: (iCalEvent *) theEvent
         [self _decomposeGroupsInRequestCalendar: calendar];
       
       if ([[ownerUser domainDefaults] iPhoneForceAllDayTransparency] && [rq isIPhone])
-        {
-          [self _adjustTransparencyInRequestCalendar: calendar];
-        }
+	[self _adjustTransparencyInRequestCalendar: calendar];
       
       [self _adjustEventsInRequestCalendar: calendar];
       [self adjustClassificationInRequestCalendar: calendar];
       [self _adjustPartStatInRequestCalendar: calendar];
+      [self _adjustFloatingTimeInRequestCalendar: calendar];
     }
       
   //
@@ -1962,7 +2029,7 @@ inRecurrenceExceptionsForEvent: (iCalEvent *) theEvent
       // TODO: send out a no-uid-conflict (DAV:href) xml element (rfc4791 section 5.3.2.1)
       if ([container resourceNameForEventUID: eventUID])
         {
-          return [NSException exceptionWithHTTPStatus: 403
+          return [NSException exceptionWithHTTPStatus: 409
                                                reason: [NSString stringWithFormat: @"Event UID already in use. (%@)", eventUID]];
         }
      
@@ -2122,6 +2189,26 @@ inRecurrenceExceptionsForEvent: (iCalEvent *) theEvent
 
           if (userIsOrganizer)
             {
+	      // We check ACLs of the 'organizer' - in case someone forges the SENT-BY
+	      NSString *uid;
+
+	      uid = [[oldEvent organizer] uidInContext: context];
+
+	      if (uid && [[[context activeUser] login] caseInsensitiveCompare: uid] != NSOrderedSame)
+		{
+		  SOGoAppointmentObject *organizerObject;
+
+		  organizerObject = [self _lookupEvent: [oldEvent uid] forUID: uid];
+		  roles = [[context activeUser] rolesForObject: organizerObject
+						     inContext: context];
+
+		  if (![roles containsObject: @"ComponentModifier"])
+		    {
+		      return [NSException exceptionWithHTTPStatus: 409
+							   reason: @"Not allowed to perform this action. Wrong SENT-BY being used regarding access rights on organizer's calendar."];
+		    }
+		}
+
               // A RECCURENCE-ID was removed
               if (!newEvent && oldEvent)
                 [self prepareDeleteOccurence: oldEvent];
@@ -2170,9 +2257,9 @@ inRecurrenceExceptionsForEvent: (iCalEvent *) theEvent
                 }
               
               // We first check of the sequences are alright. We don't accept attendees
-              // accepting "old" invitations. If that's the case, we return a 403
+              // accepting "old" invitations. If that's the case, we return a 409
               if ([[newEvent sequence] intValue] < [[oldEvent sequence] intValue])
-                return [NSException exceptionWithHTTPStatus: 403
+                return [NSException exceptionWithHTTPStatus: 409
                                                      reason: @"sequences don't match"];
               
               // Remove the RSVP attribute, as an action from the attendee

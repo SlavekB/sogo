@@ -409,6 +409,11 @@ NSString *iCalWeekDayString[] = { @"SU", @"MO", @"TU", @"WE", @"TH", @"FR",
   return [[self flattenedValuesForKey: @"count"] intValue];
 }
 
+- (BOOL) hasRepeatCount
+{
+  return [[self flattenedValuesForKey: @"count"] length] > 0;
+}
+
 - (void) setCount: (NSString *) _count
 {
   [self setSingleValue: _count forKey: @"count"];
@@ -467,9 +472,16 @@ NSString *iCalWeekDayString[] = { @"SU", @"MO", @"TU", @"WE", @"TH", @"FR",
 
 - (iCalByDayMask *) byDayMask
 {
+  NSArray *setPos;
+  NSString *day;
+
   if (dayMask == nil && [[self byDay] length])
     {
-      dayMask = [iCalByDayMask byDayMaskWithRuleString: [self byDay]];
+      day = [self byDay];
+      setPos = [self bySetPos];
+      if ([setPos count])
+        day = [NSString stringWithFormat: @"%@%@", [setPos lastObject], day];
+      dayMask = [iCalByDayMask byDayMaskWithRuleString: day];
       [dayMask retain];
     }
   

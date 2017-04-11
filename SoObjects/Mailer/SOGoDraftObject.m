@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2007-2014 Inverse inc.
+  Copyright (C) 2007-2016 Inverse inc.
   Copyright (C) 2004-2005 SKYRIX Software AG
 
   This file is part of SOGo.
@@ -15,7 +15,7 @@
   License for more details.
 
   You should have received a copy of the GNU Lesser General Public
-  License along with OGo; see the file COPYING.  If not, write to the
+  License along with SOGo; see the file COPYING.  If not, write to the
   Free Software Foundation, 59 Temple Place - Suite 330, Boston, MA
   02111-1307, USA.
 */
@@ -65,6 +65,7 @@
 #import <SOGo/SOGoMailer.h>
 #import <SOGo/SOGoUser.h>
 #import <SOGo/SOGoUserDefaults.h>
+#import <SOGo/SOGoSystemDefaults.h>
 
 #import <NGCards/NGVCard.h>
 
@@ -73,6 +74,7 @@
 
 #import "NSData+Mail.h"
 #import "NSString+Mail.h"
+#import "SOGoDraftsFolder.h"
 #import "SOGoMailAccount.h"
 #import "SOGoMailFolder.h"
 #import "SOGoMailObject.h"
@@ -649,6 +651,12 @@ static NSString    *userAgent      = nil;
 
   error = nil;
   message = [self mimeMessageAsData];
+
+  if (!message)
+    {
+      error = [NSException exceptionWithHTTPStatus: 500 /* Server Error */
+					    reason: @"message too big"];
+    }
 
   client = [[self imap4Connection] client];
 
@@ -1439,18 +1447,27 @@ static NSString    *userAgent      = nil;
 }
 
 //
-//
+// returns nil on error
 //
 - (NSArray *) bodyPartsForAllAttachments
 {
-  /* returns nil on error */
-  NSArray  *attrs;
-  unsigned i, count;
   NGMimeBodyPart *bodyPart;
   NSMutableArray *bodyParts;
+  NSArray  *attrs;
+  unsigned i, count, size, limit;
 
   attrs = [self fetchAttachmentAttrs];
   count = [attrs count];
+  size = 0;
+
+  // We first check if we don't go over our message size limit
+  limit = [[SOGoSystemDefaults sharedSystemDefaults] maximumMessageSizeLimit] * 1024;
+  for (i = 0; i < count; i++)
+    size += [[[attrs objectAtIndex: i] objectForKey: @"size"] intValue];
+
+  if (limit && size > limit)
+    return nil;
+
   bodyParts = [NSMutableArray arrayWithCapacity: count];
 
   for (i = 0; i < count; i++)
@@ -1508,13 +1525,9 @@ static NSString    *userAgent      = nil;
   mBody = [[NGMimeMultipartBody alloc] initWithPart: message];
   
   if (!isHTML)
-    {
-      part = [self bodyPartForText];
-    }
+    part = [self bodyPartForText];
   else
-    {
-      part = [self mimeMultipartAlternative];
-    }
+    part = [self mimeMultipartAlternative];
 
   [mBody addBodyPart: part];
 
@@ -1716,8 +1729,10 @@ static NSString    *userAgent      = nil;
 {
   NSMutableArray *bodyParts;
   NGMimeMessage *message;
+  NSArray *allBodyParts;
   NGMutableHashMap *map;
   NSString *newText;
+
   BOOL has_inline_images;
 
   message = nil;
@@ -1739,8 +1754,12 @@ static NSString    *userAgent      = nil;
   if (map)
     {
       //[self debugWithFormat: @"MIME Envelope: %@", map];
-      
-      [bodyParts addObjectsFromArray: [self bodyPartsForAllAttachments]];
+      allBodyParts = [self bodyPartsForAllAttachments];
+
+      if (!allBodyParts)
+	return nil;
+
+      [bodyParts addObjectsFromArray: allBodyParts];
       
       //[self debugWithFormat: @"attachments: %@", bodyParts];
       
@@ -1781,10 +1800,19 @@ static NSString    *userAgent      = nil;
 - (NSData *) mimeMessageAsData
 {
   NGMimeMessageGenerator *generator;
+  NGMimeMessage *mimeMessage;
   NSData *message;
 
   generator = [NGMimeMessageGenerator new];
-  message = [generator generateMimeFromPart: [self mimeMessageWithHeaders: nil  excluding: nil  extractingImages: NO]];
+  mimeMessage = [self mimeMessageWithHeaders: nil  excluding: nil  extractingImages: NO];
+
+  if (!mimeMessage)
+    {
+      [generator release];
+      return nil;
+    }
+
+  message = [generator generateMimeFromPart: mimeMessage];
   [generator release];
 
   return message;
@@ -1900,15 +1928,11 @@ static NSString    *userAgent      = nil;
 //
 - (NSException *) sendMailAndCopyToSent: (BOOL) copyToSent
 {
-  NSMutableData *cleaned_message;
   SOGoMailFolder *sentFolder;
   SOGoDomainDefaults *dd;
   NSURL *sourceIMAP4URL;
   NSException *error;
   NSData *message;
-  NSRange r1;
-
-  unsigned int limit;
 
   // We strip the BCC fields prior sending any mails
   NGMimeMessageGenerator *generator;
@@ -1916,43 +1940,9 @@ static NSString    *userAgent      = nil;
   generator = [[[NGMimeMessageGenerator alloc] init] autorelease];
   message = [generator generateMimeFromPart: [self mimeMessage]];
 
-  //
-  // We now look for the Bcc: header. If it is present, we remove it.
-  // Some servers, like qmail, do not remove it automatically.
-  //
-#warning FIXME - we should fix the case issue when we switch to Pantomime
-  cleaned_message = [NSMutableData dataWithData: message];
-
-  // We search only in the headers so we start at 0 until
-  // we find \r\n\r\n, which is the headers delimiter
-  r1 = [cleaned_message rangeOfCString: "\r\n\r\n"];
-  limit = r1.location-1;
-  r1 = [cleaned_message rangeOfCString: "\r\nbcc: "
-                               options: 0
-                                 range: NSMakeRange(0,limit)];
-      
-  if (r1.location != NSNotFound)
-    {
-      // We search for the first \r\n AFTER the Bcc: header and
-      // replace the whole thing with \r\n.
-      unsigned int i;
-
-      for (i = r1.location+7; i < limit; i++)
-        {
-          if ([cleaned_message characterAtIndex: i] == '\r' &&
-              (i+1 < limit && [cleaned_message characterAtIndex: i+1] == '\n') &&
-              (i+2 < limit && !isspace([cleaned_message characterAtIndex: i+2])))
-            break;
-        }
-
-      [cleaned_message replaceBytesInRange: NSMakeRange(r1.location, i-r1.location)
-                                 withBytes: NULL
-                                    length: 0];
-    }
-
   dd = [[context activeUser] domainDefaults];
   error = [[SOGoMailer mailerWithDomainDefaults: dd]
-                  sendMailData: cleaned_message
+                  sendMailData: message
                   toRecipients: [self allBareRecipients]
                         sender: [self sender]
              withAuthenticator: [self authenticatorInContext: context]
@@ -1979,8 +1969,16 @@ static NSString    *userAgent      = nil;
         }
     }
 
-  if (!error && ![dd mailKeepDraftsAfterSend])
-    [self delete];
+  // Expunge Drafts mailbox if
+  //  - message was sent and saved to Sent mailbox if necessary;
+  //  - SOGoMailKeepDraftsAfterSend is not set;
+  //  - draft is successfully deleted;
+  //  - drafts mailbox exists.
+  if (!error &&
+      ![dd mailKeepDraftsAfterSend] &&
+      ![self delete] &&
+      [imap4 doesMailboxExistAtURL: [container imap4URL]])
+    [(SOGoDraftsFolder *) container expunge];
 
   return error;
 }

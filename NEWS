@@ -1,13 +1,150 @@
-2.3.14 (2016-MM-DD)
+2.3.21 (2017-XX-XX)
+-------------------
+
+Bug fixes
+ - [core] fixed calendar component move across collections (#4116)
+ - [eas] fixed opacity in EAS freebusy (#4033)
+ - [eas] set reply/forwarded flags when ReplaceMime is set (#4133)
+ - [eas] remove alarms over EAS if we don't want them (#4059)
+
+2.3.20 (2017-03-10)
+-------------------
+
+New features
+ - [core] new sogo-tool checkup command to make sure user's data is sane 
+ - [core] new sogo-tool manage-acl command to manage calendar/address book ACLs
+ - [web] use "date" extension of Sieve to enable/disable vacation auto-reply (#1530, #1949)
+
+Enhancements
+ - [web] added Hebrew (he) translation - thanks to Raz Aidlitz
+ - [web] updated CKEditor to version 4.6.2
+
+Bug fixes
+ - [core] remove all alarms before sending IMIP replies (#3925)
+ - [core] fixed handling of exdates and proper intersection for fbinfo (#4051)
+ - [core] remove attendees that have the same identity as the organizer (#3905)
+ - [eas] improved EAS parameters parsing (#4003)
+ - [eas] properly handle canceled appointments
+ - [web] fixed SCAYT automatic language selection in HTML editor
+ - [web] prevent 304 HTTP status code for Ajax requests on IE (#4066)
+
+2.3.19 (2017-01-09)
+-------------------
+
+Enhancements
+ - [core] added handling of BYSETPOS for BYDAY in recurrence rules
+ - [core] improved IMIP handling from Exchange/Outlook clients
+ - [web] update jQuery to version 1.12.4 and jQuery UI to version 1.11.4
+ - [web] added SOGoMaximumMessageSizeLimit to limit webmail message size
+ - [web] added photo support for LDIF import (#1084)
+ - [web] updated CKEditor to version 4.6.1
+
+Bug fixes
+ - [core] honor blocking wrong login attemps within time interval (#2850)
+ - [core] use source's domain when none defined and trying to match users (#3523)
+ - [core] properly honor the "include in freebusy" setting (#3354)
+ - [core] fix events in floating time during CalDAV's PUT operation (#2865)
+ - [core] handle rounds in sha512-crypt password hashes
+ - [web] return login page for unknown users (#2135)
+ - [web] append ics file extension when importing events (#2308)
+ - [web] set a max-height so we can scroll in the attendees list (#3666)
+ - [web] set a max-height so we can scroll in the attachments list (#3413)
+ - [web] handle URI in vCard photos (#2683)
+ - [web] handle semicolon in values during LDIF import (#1760)
+ - [eas] properly escape all GAL responses (#3923)
+ - [eas] properly skip folders we don't want to synchronize (#3943)
+ - [eas] fixed 30 mins freebusy offset with S Planner
+ - [eas] now correctly handles reminders on tasks (#3964)
+ - [eas] do not decode from hex the event's UID (#3965)
+ - [eas] add support for "other addresses" (#3966)
+ - [eas] provide correct response status when sending too big mails (#3956)
+
+2.3.18 (2016-11-28)
+-------------------
+
+New features
+ - [eas] relaxed permission requirements for subscription synchronizations (#3118 and #3180)
+
+Enhancements
+ - [core] added sha256-crypt and sha512-crypt password support
+ - [core] updated time zones to version 2016h
+ - [eas] initial support for recurring tasks EAS
+ - [eas] now support replied/forwarded flags using EAS (#3796)
+ - [eas] now also search on senders when using EAS Search ops
+ - [web] updated CKEditor to version 4.6.0
+
+Bug fixes
+ - [core] fixed condition in weekly recurrence calculator
+ - [core] always send IMIP messages using UTF-8
+ - [web] fixed support for recurrent tasks
+ - [web] improved validation of mail account delegators
+ - [web] allow edition of a mailbox rights when user can administer mailbox
+ - [web] restore attributes when rewriting base64-encoded img tags (#3814)
+
+2.3.17 (2016-10-20)
+-------------------
+
+Enhancements
+ - [web] allow custom email address to be one of the user's profile (#3551)
+ - [web] the left column of the attendees editor is resizable (not supported in IE) (#1479, #3667)
+
+Bug fixes
+ - [eas] make sure we don't sleep for too long when EAS processes need interruption
+ - [eas] fixed recurring events with timezones for EAS (#3822)
+ - [eas] improve handling of email folders without a parent
+ - [eas] never send IMIP reply when the "initiator" is Outlook 2013/2016 
+ - [core] only consider SMTP addresses for AD's proxyAddresses (#3842)
+
+2.3.16 (2016-09-28)
+-------------------
+
+New features
+ - [eas] initial support for server-side mailbox search operations
+
+Enhancements
+ - [eas] propagate message submission errors to EAS clients (#3774)
+ - [web] updated CKEditor to version 4.5.11
+ - [web] added Serbian (sr) translation - thanks to Bogdanović Bojan
+
+Bug fixes
+ - [web] correctly set percent-complete for tasks from the list view (#3197)
+ - [core] fixed caching expiration of ACLs assigned to LDAP groups (#2867)
+ - [core] we now search in all domain sources for Apple Calendar
+ - [core] properly handle groups in Apple Calendar's delegation
+ - [core] make sure new cards always have a UID (#3819)
+
+2.3.15 (2016-09-14)
+-------------------
+
+Enhancements
+ - [web] don't allow a recurrence rule to end before the first occurrence
+
+Bug fixes
+ - [eas] properly generate the BusyStatus for normal events
+ - [eas] properly escape all email and address fields
+ - [eas] properly generate yearly rrule
+ - [core] strip protocol value from proxyAddresses attribute (#3182)
+ - [web] handle binary content transfer encoding when displaying mails
+
+2.3.14 (2016-08-17)
 -------------------
 
 New features
  - [eas] added folder merging capabilities
 
 Enhancements
+ - [web] expunge drafts mailbox when a draft is sent and deleted
+ - [web] style cancelled events in Calendar module (#2800)
+ - [web] updated CKEditor to version 4.5.10
 
 Bug fixes
  - [eas] fixed long GUID issue preventing sometimes synchronisation (#3460)
+ - [web] improved extraction of HTML signature in Preferences module
+ - [web] really delete mailboxes being deleted from the Trash folder (#595, #1189, #641)
+ - [core] fixing sogo-tool backup with multi-domain configuration but domain-less logins
+ - [core] during event scheduling, use 409 instead of 403 so Lightning doesn't fail silently
+ - [core] correctly calculate recurrence exceptions when not overlapping the recurrence id
+ - [core] prevent invalid SENT-BY handling during event invitations (#3759)
 
 2.3.13 (2016-07-06)
 -------------------

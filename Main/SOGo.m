@@ -35,6 +35,7 @@
 #import <GDLContentStore/GCSAlarmsFolder.h>
 #import <GDLContentStore/GCSSessionsFolder.h>
 
+#import <NGObjWeb/NSException+HTTP.h>
 #import <NGObjWeb/SoClassSecurityInfo.h>
 #import <NGObjWeb/WOContext.h>
 #import <NGObjWeb/WORequest+So.h>
@@ -123,7 +124,7 @@ static BOOL debugLeaks;
   vMemSizeLimit = [defaults vmemLimit];
   if (vMemSizeLimit > 0)
     [self logWithFormat: @"vmem size check enabled: shutting down app when "
-          @"vmem > %d MB", vMemSizeLimit];
+          @"vmem > %d MB. Currently at %d MB", vMemSizeLimit, [[NSProcessInfo processInfo] virtualMemorySize]/1048576];
 
   /* SoClass security declarations */
   sInfo = [self soClassSecurityInfo];
@@ -146,6 +147,8 @@ static BOOL debugLeaks;
 
   /* load products */
   [[SOGoProductLoader productLoader] loadAllProducts: YES];
+  if (vMemSizeLimit > 0)
+    [self logWithFormat: @"All products loaded - current memory usage at %d MB", [[NSProcessInfo processInfo] virtualMemorySize]/1048576];
 }
 
 - (id) init
@@ -369,8 +372,12 @@ static BOOL debugLeaks;
              "GET" if no method was provided in the query path.
           */
           if ([_key length] > 0 && ![_key isEqualToString:@"favicon.ico"])
-            obj = [self lookupUser: _key inContext: _ctx];
-        }
+            {
+              obj = [self lookupUser: _key inContext: _ctx];
+              if (!obj && ![_key isEqualToString: @"public"])
+		obj = [self lookupUser: @"anonymous" inContext: _ctx];
+            }
+       }
     }
   else
     obj = nil;
@@ -396,8 +403,12 @@ static BOOL debugLeaks;
 - (WOResponse *) handleException: (NSException *) _exc
                        inContext: (WOContext *) _ctx
 {
-  printf("EXCEPTION: %s\n", [[_exc description] cString]);
-  abort();
+  WOResponse *resp;
+
+  NSLog(@"EXCEPTION: %s\n", [[_exc description] cString]);
+  resp = [WOResponse responseWithRequest: [_ctx request]];
+  [resp setStatus: 501];
+  return resp;
 }
 
 /* runtime maintenance */

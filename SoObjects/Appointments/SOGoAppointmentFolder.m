@@ -30,6 +30,7 @@
 
 #import <NGObjWeb/NSException+HTTP.h>
 #import <NGObjWeb/SoObject+SoDAV.h>
+#import <NGObjWeb/WOApplication.h>
 #import <NGObjWeb/WOContext+SoObjects.h>
 #import <NGObjWeb/WOMessage.h>
 #import <NGObjWeb/WORequest.h>
@@ -709,7 +710,7 @@ static Class iCalEventK = nil;
   if ([title length])
     [baseWhere
       addObject: [NSString stringWithFormat: @"c_title isCaseInsensitiveLike: '%%%@%%'",
-                           [title stringByReplacingString: @"'"  withString: @"\\'\\'"]]];
+                           [title asSafeSQLString]]];
 
   if (component)
     {
@@ -869,16 +870,22 @@ static Class iCalEventK = nil;
     }
   [record setObject: dateSecs forKey: @"c_recurrence_id"];
 
-  date = [theCycle endDate];
-  if (theEventTimeZone)
+  date = [record valueForKey: @"c_enddate"];
+  if ([date isNotNull])
     {
-      secondsOffsetFromGMT = (int) [[theEventTimeZone periodForDate: date] secondsOffsetFromGMT];
-      date = [date dateByAddingYears: 0 months: 0 days: 0 hours: 0 minutes: 0 seconds: -secondsOffsetFromGMT];
+      date = [theCycle endDate];
+      if (theEventTimeZone)
+        {
+          secondsOffsetFromGMT = (int) [[theEventTimeZone periodForDate: date] secondsOffsetFromGMT];
+          date = [date dateByAddingYears: 0 months: 0 days: 0 hours: 0 minutes: 0 seconds: -secondsOffsetFromGMT];
+        }
+      [date setTimeZone: timeZone];
+      [record setObject: date forKey: @"endDate"];
+      dateSecs = [NSNumber numberWithInt: [date timeIntervalSince1970]];
+      [record setObject: dateSecs forKey: @"c_enddate"];
     }
-  [date setTimeZone: timeZone];
-  [record setObject: date forKey: @"endDate"];
-  dateSecs = [NSNumber numberWithInt: [date timeIntervalSince1970]];
-  [record setObject: dateSecs forKey: @"c_enddate"];
+  else
+    [record removeObjectForKey: @"endDate"];
   
   return record;
 }
@@ -979,12 +986,15 @@ firstInstanceCalendarDateRange: (NGCalendarDateRange *) fir
                   withTimeZone: (NSTimeZone *) tz
                        toArray: (NSMutableArray *) ma
 {
-  NSCalendarDate *recurrenceId;
+  NGCalendarDateRange *recurrenceIdRange;
+  NSCalendarDate *recurrenceId, *masterEndDate, *endDate;
   NSMutableDictionary *newRecord;
   NGCalendarDateRange *newRecordRange;
-  NSComparisonResult compare;
-  int recordIndex, secondsOffsetFromGMT;
   NSNumber *dateSecs;
+  id master;
+
+  int recordIndex, secondsOffsetFromGMT;
+  NSTimeInterval delta;
 
   newRecord = nil;
   recurrenceId = [component recurrenceId];
@@ -1006,17 +1016,32 @@ firstInstanceCalendarDateRange: (NGCalendarDateRange *) fir
       [recurrenceId setTimeZone: tz];
     }
 
-  compare = [[dateRange startDate] compare: recurrenceId];
-  if ((compare == NSOrderedAscending || compare == NSOrderedSame) &&
-      [[dateRange endDate] compare: recurrenceId] == NSOrderedDescending)
+  if ([component isKindOfClass: [iCalEvent class]])
+    {
+      master = [[[component parent] events] objectAtIndex: 0];
+      masterEndDate = [master endDate];
+      endDate = [(iCalEvent*) component endDate];
+    }
+  else
+    {
+      master = [[[component parent] todos] objectAtIndex: 0];
+      masterEndDate = [master due];
+      endDate = [(iCalToDo*) component due];
+    }
+
+  delta = [masterEndDate timeIntervalSinceDate: [master startDate]];
+  recurrenceIdRange = [NGCalendarDateRange calendarDateRangeWithStartDate: recurrenceId
+								  endDate: [recurrenceId dateByAddingYears:0 months:0 days:0 hours:0 minutes:0 seconds: delta]];
+  if ([dateRange doesIntersectWithDateRange: recurrenceIdRange])
     {
       // The recurrence exception intersects with the date range;
       // find the occurence and replace it with the new record
       recordIndex = [self _indexOfRecordMatchingDate: recurrenceId inArray: ma];
       if (recordIndex > -1)
 	{
-          if ([dateRange containsDate: [component startDate]])
-            {
+          if ([dateRange containsDate: [component startDate]] ||
+	      (endDate && [dateRange containsDate: endDate]))
+	    {
               // We must pass nil to :container here in order to avoid re-entrancy issues.
               newRecord = [self _fixupRecord: [component quickRecordFromContent: nil  container: nil]];
               [ma replaceObjectAtIndex: recordIndex withObject: newRecord];
@@ -1274,17 +1299,13 @@ firstInstanceCalendarDateRange: (NGCalendarDateRange *) fir
 {
   NSMutableArray *ma;
   NSDictionary *row;
-  NSCalendarDate *rangeEndDate;
   unsigned int count, max;
 
   max = [_records count];
   ma = [NSMutableArray arrayWithCapacity: max];
 
-  // Adjust the range so it ends at midnight. This is necessary when calculating
-  // recurrences of all-day events.
-  rangeEndDate = [[_r endDate] dateByAddingYears:0 months:0 days:0 hours:0 minutes:0 seconds:1];
   _r = [NGCalendarDateRange calendarDateRangeWithStartDate: [_r startDate]
-						   endDate: rangeEndDate];
+						   endDate: [_r endDate]];
 
   for (count = 0; count < max; count++)
     {
@@ -1425,14 +1446,14 @@ firstInstanceCalendarDateRange: (NGCalendarDateRange *) fir
               if ([filters isEqualToString:@"title_Category_Location"] || [filters isEqualToString:@"entireContent"])
                 {
                   [baseWhere addObject: [NSString stringWithFormat: @"(c_title isCaseInsensitiveLike: '%%%@%%' OR c_category isCaseInsensitiveLike: '%%%@%%' OR c_location isCaseInsensitiveLike: '%%%@%%')",
-                                                  [title stringByReplacingString: @"'"  withString: @"\\'\\'"],
-                                                  [title stringByReplacingString: @"'"  withString: @"\\'\\'"],
-                                                  [title stringByReplacingString: @"'"  withString: @"\\'\\'"]]];
+                                                  [title asSafeSQLString],
+                                                  [title asSafeSQLString],
+                                                  [title asSafeSQLString]]];
                 }
             }
           else
             [baseWhere addObject: [NSString stringWithFormat: @"c_title isCaseInsensitiveLike: '%%%@%%'",
-                                            [title stringByReplacingString: @"'"  withString: @"\\'\\'"]]];
+                                            [title asSafeSQLString]]];
         }
       
       /* prepare mandatory fields */
@@ -2585,7 +2606,7 @@ firstInstanceCalendarDateRange: (NGCalendarDateRange *) fir
   if (uid && folder)
     {
       qualifier = [EOQualifier qualifierWithQualifierFormat: @"c_uid = %@",
-			       uid];
+			       [uid asSafeSQLString]];
       records = [folder fetchFields: nameFields matchingQualifier: qualifier];
       count = [records count];
       if (count)
@@ -3125,6 +3146,12 @@ firstInstanceCalendarDateRange: (NGCalendarDateRange *) fir
         }
     }
 
+  // If the UID isn't ending with the ".ics" extension, let's add it to avoid
+  // confusing broken CalDAV client (like Nokia N9 and Korganizer) that relies
+  // on this (see #2308)
+  if (![[uid lowercaseString] hasSuffix: @".ics"])
+    uid = [NSString stringWithFormat: @"%@.ics", uid];
+
   object = [SOGoAppointmentObject objectWithName: uid
                                     inContainer: self];
   [object setIsNew: YES];
@@ -3204,7 +3231,8 @@ firstInstanceCalendarDateRange: (NGCalendarDateRange *) fir
 	      else
 		{
 		  // If the start date is a "floating time", let's use the user's timezone
-		  // during the import for both the start and end dates.
+		  // during the import for both the start and end dates. This is similar
+		  // to what we do in SOGoAppointmentObject: -_adjustFloatingTimeInRequestCalendar:
 		  NSString *s;
 		  
 		  s = [[startDate valuesAtIndex: 0 forKey: @""] objectAtIndex: 0];
@@ -3288,8 +3316,7 @@ firstInstanceCalendarDateRange: (NGCalendarDateRange *) fir
                                   timezone: timezone]))
             {
               imported++;
-              [uids setValue: uid
-                      forKey: originalUid];
+              [uids setValue: uid  forKey: originalUid];
             }
         }
       

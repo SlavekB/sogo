@@ -52,8 +52,17 @@
 
 #import "UIxContactFolderActions.h"
 
+static NSArray *photoTags = nil;
+
 @implementation UIxContactFolderActions
 
++ (void) initialize
+{
+  if (!photoTags)
+    {
+      photoTags = [[NSArray alloc] initWithObjects: @"jpegphoto", @"photo", @"thumbnailphoto", nil];
+    }
+}
 
 /* actions */
 
@@ -146,24 +155,26 @@
 
 - (int) importLdifData: (NSString *) ldifData
 {
+  NSMutableDictionary *entry, *encodedEntry;
+  SOGoContactLDIFEntry *ldifEntry;
+  NSArray *ldifContacts, *lines;
   SOGoContactGCSFolder *folder;
-  NSString *key, *value;
-  NSArray *ldifContacts, *lines, *components;
-  NSMutableDictionary *entry;
+  NSEnumerator *keyEnumerator;
+  NSString *key, *uid, *line;
   NGVCard *vCard;
-  NSString *uid;
-  int i,j,count,linesCount;
-  int rc = 0;
+  id value;
+
+  NSRange r;
+  int i, j, count, linesCount;
+  int rc;
 
   folder = [self clientObject];
   ldifContacts = [ldifData componentsSeparatedByString: @"\ndn"];
   count = [ldifContacts count];
+  rc = 0;
 
   for (i = 0; i < count; i++)
     {
-      SOGoContactLDIFEntry *ldifEntry;
-      NSEnumerator *keyEnumerator;
-      NSMutableDictionary *encodedEntry;
       encodedEntry = [NSMutableDictionary dictionary];
       lines = [[ldifContacts objectAtIndex: i] 
                componentsSeparatedByString: @"\n"];
@@ -172,7 +183,6 @@
       linesCount = [lines count];
       for (j = 0; j < linesCount; j++)
         {
-          NSString *line;
           line = [lines objectAtIndex: j];
 
           /* skip embedded comment lines */
@@ -188,17 +198,17 @@
               if (key != NULL)
                 {
                   value = [[encodedEntry valueForKey: key]
-                           stringByAppendingString: [line substringFromIndex: 1]];
+			    stringByAppendingString: [line substringFromIndex: 1]];
                   [encodedEntry setValue: value forKey: key];
                 }
               continue;
             }
 
-          components = [line componentsSeparatedByString: @": "];
-          if ([components count] == 2)
+          r = [line rangeOfString: @": "];
+	  if (r.location != NSNotFound)
             {
-              key = [[components objectAtIndex: 0] lowercaseString];
-              value = [components objectAtIndex: 1];
+              key = [[line substringToIndex: r.location] lowercaseString];
+              value = [line substringFromIndex: NSMaxRange(r)];
 
               if ([key length] == 0)
                 key = @"dn";
@@ -220,8 +230,16 @@
           if ([key hasSuffix: @":"])
             {
               key = [key substringToIndex: [key length] - 1];
-              value = [value stringByDecodingBase64];
+	      if ([photoTags containsObject: key])
+		value = [value dataByDecodingBase64];
+	      else
+		value = [value stringByDecodingBase64];
             }
+
+	  // Standard key recognized in NGCards
+	  if ([photoTags containsObject: key])
+	    key = @"photo";
+
           [entry setValue: value forKey: key];
         }
 

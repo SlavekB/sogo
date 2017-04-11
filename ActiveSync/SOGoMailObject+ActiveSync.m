@@ -163,7 +163,7 @@ struct GlobalObjectId {
   const char *bytes;
 
   uid = [event uid];
-  uidAsASCII = [uid decodeFromHexidecimal];
+  uidAsASCII = [uid dataUsingEncoding: NSASCIIStringEncoding];
   newGlobalId = (struct GlobalObjectId*)calloc(sizeof(uint8_t), sizeof(struct GlobalObjectId) + 0x0c + [uidAsASCII length]);
 
   prefix = @"040000008200e00074c5b7101a82e008";
@@ -934,7 +934,7 @@ struct GlobalObjectId {
       else if ([method isEqualToString: @"COUNTER"])
         className = @"IPM.Schedule.Meeting.Resp.Tent";
       else if ([method isEqualToString: @"CANCEL"])
-        className = @"IPM.Schedule.Meeting.Cancelled";
+        className = @"IPM.Schedule.Meeting.Canceled";
       else
         className = @"IPM.Appointment";
       
@@ -1003,7 +1003,7 @@ struct GlobalObjectId {
       [s appendFormat: @"<GlobalObjId xmlns=\"Email:\">%@</GlobalObjId>", [globalObjId activeSyncRepresentationInContext: context]];
 
       // We set the right message type - we must set AS version to 14.1 for this
-      if ([[context valueForKey: @"ASProtocolVersion"] floatValue] >= 14.1)
+      if ([[context objectForKey: @"ASProtocolVersion"] floatValue] >= 14.1)
         [s appendFormat: @"<MeetingMessageType xmlns=\"Email2:\">%d</MeetingMessageType>", 1];
 
       [s appendString: @"</MeetingRequest>"];
@@ -1169,7 +1169,7 @@ struct GlobalObjectId {
           truncated = 0;
         }
 
-      if ([[context valueForKey: @"ASProtocolVersion"] isEqualToString: @"2.5"])
+      if ([[context objectForKey: @"ASProtocolVersion"] isEqualToString: @"2.5"])
         {
           [s appendFormat: @"<Body xmlns=\"Email:\">%@</Body>", content];
           [s appendFormat: @"<BodyTruncated xmlns=\"Email:\">%d</BodyTruncated>", truncated];
@@ -1204,7 +1204,7 @@ struct GlobalObjectId {
     {
       int i;
 
-      if ([[context valueForKey: @"ASProtocolVersion"] isEqualToString: @"2.5"])
+      if ([[context objectForKey: @"ASProtocolVersion"] isEqualToString: @"2.5"])
         [s appendString: @"<Attachments xmlns=\"Email:\">"];
       else
         [s appendString: @"<Attachments xmlns=\"AirSyncBase:\">"];
@@ -1219,12 +1219,12 @@ struct GlobalObjectId {
           // FileReference must be a unique identifier across the whole store. We use the following structure:
           // mail/<foldername>/<message UID/<pathofpart>
           // mail/INBOX/2          
-          if ([[context valueForKey: @"ASProtocolVersion"] isEqualToString: @"2.5"])
+          if ([[context objectForKey: @"ASProtocolVersion"] isEqualToString: @"2.5"])
             [s appendFormat: @"<AttName>mail/%@/%@/%@</AttName>", [[[self container] relativeImap4Name] stringByEscapingURL], [self nameInContainer], [value objectForKey: @"path"]];
           else
             [s appendFormat: @"<FileReference>mail/%@/%@/%@</FileReference>", [[[self container] relativeImap4Name] stringByEscapingURL], [self nameInContainer], [value objectForKey: @"path"]];
 
-          if ([[context valueForKey: @"ASProtocolVersion"] isEqualToString: @"2.5"])
+          if ([[context objectForKey: @"ASProtocolVersion"] isEqualToString: @"2.5"])
             {
               [s appendFormat: @"<AttMethod>%d</AttMethod>", 1];
               [s appendFormat: @"<AttSize>%d</AttSize>", [[value objectForKey: @"size"] intValue]];
@@ -1273,7 +1273,7 @@ struct GlobalObjectId {
       [s appendFormat: @"</Categories>"];
     }
   
-    if ([[context valueForKey: @"ASProtocolVersion"] floatValue] >= 14.0)
+    if ([[context objectForKey: @"ASProtocolVersion"] floatValue] >= 14.0)
     {
       id value;
       NSString *reference;
@@ -1291,6 +1291,13 @@ struct GlobalObjectId {
         [s appendFormat: @"<ConversationId xmlns=\"Email2:\">%@</ConversationId>", [[[self inReplyTo] dataUsingEncoding: NSUTF8StringEncoding] activeSyncRepresentationInContext: context]];
       else if ([[self messageId] length] > 0)
         [s appendFormat: @"<ConversationId xmlns=\"Email2:\">%@</ConversationId>", [[[self messageId] dataUsingEncoding: NSUTF8StringEncoding] activeSyncRepresentationInContext: context]];
+
+      if ([self replied])
+        [s appendFormat: @"<LastVerbExecuted xmlns=\"Email2:\">%d</LastVerbExecuted>", 1];
+      else if ([self forwarded])
+        [s appendFormat: @"<LastVerbExecuted xmlns=\"Email2:\">%d</LastVerbExecuted>", 3];
+      else
+        [s appendFormat: @"<LastVerbExecuted xmlns=\"Email2:\">%d</LastVerbExecuted>", 0];
     }
 
   // FIXME - support these in the future

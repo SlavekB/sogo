@@ -1,3 +1,5 @@
+/* -*- Mode: javascript; indent-tabs-mode: nil; js-indent-level: 4; -*- */
+
 /* generic.js - this file is part of SOGo
 
    Copyright (C) 2006-2014 Inverse
@@ -460,12 +462,22 @@ function getContrastingTextColor(bgColor) {
 }
 
 function triggerAjaxRequest(url, callback, userdata, content, headers, attempt) {
-    var http = createHTTPClient();
+    var http = createHTTPClient(),
+        method = (content? 'POST' : 'GET');
     if (http) {
         activeAjaxRequests++;
         document.animTimer = setTimeout("checkAjaxRequestsState();", 250);
 
-        http.open("POST", url, true);
+        if (Prototype.Browser.IE) {
+            // Prevent 304 HTTP status code from the server
+            if (url.indexOf('?') >= 0)
+                url += '&';
+            else
+                url += '?';
+            url += 'nc=' + Math.random();
+        }
+
+        http.open(method, url, true);
         http.url = url;
         http.paramHeaders = headers;
         http.content = content;
@@ -2280,6 +2292,22 @@ function _disposeDialog() {
         dialogsStack.splice(0, 1);
         dialogFcn();
     }
+}
+
+// Pickup the first matching language supported by SCAYT
+// See http://docs.ckeditor.com/#!/guide/dev_howtos_scayt
+function scaytLang(locale) {
+    var i, langs, lang;
+
+    langs = ['en_US', 'en_GB', 'pt_BR', 'da_DK', 'nl_NL', 'en_CA', 'fi_FI', 'fr_FR', 'fr_CA', 'de_DE', 'el_GR', 'it_IT', 'nb_NO', 'pt_PT', 'es_ES', 'sv_SE'];
+    lang = 'en_US';
+    for (i = 0; i < langs.length; i++)
+        if (langs[i].lastIndexOf(locale, 0) == 0) {
+            lang = langs[i];
+            break;
+        }
+
+    return lang;
 }
 
 function readCookie(name) {
